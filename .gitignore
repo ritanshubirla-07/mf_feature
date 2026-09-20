@@ -1,0 +1,33 @@
+# Python bytecode & cache
+__pycache__/
+*.py[cod]
+*$py.class
+*.so
+.Python
+build/
+dist/
+*.egg-info/
+
+# Virtual Environments
+venv/
+.venv/
+env/
+
+# Data and Cache files
+*.csv
+*.json
+
+# Excel files & Office lock files
+*.xlsx
+*.xls
+*.xlsm
+~$*.xlsx
+~$*.xls
+
+# Environment & Logs
+*.log
+.env
+.DS_Store
+Thumbs.db
+.idea/
+.vscode/
