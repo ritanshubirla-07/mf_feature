@@ -1,4 +1,4 @@
-# Python bytecode & cache
+# Python bytecode & environments
 __pycache__/
 *.py[cod]
 *$py.class
@@ -7,27 +7,45 @@ __pycache__/
 build/
 dist/
 *.egg-info/
-
-# Virtual Environments
 venv/
 .venv/
 env/
 
-# Data and Cache files
-*.csv
-*.json
+# Large Fact Tables & Archives (>100MB shared via Google Drive)
+amfi_nav_master.csv/
+*.zip
+*.tar.gz
 
-# Excel files & Office lock files
+# Data exclusions with whitelist
+*.csv
+!amfi_nav_master_latest.csv
+!fund_manager_master.csv
+!flexi_cap_growth_funds.csv
+!benchmark_index_history.csv
+
+*.json
+!mf_history_cache.json
+!scratch/*.json
+
+# Excel files (all generated outputs ignored)
 *.xlsx
 *.xls
 *.xlsm
 ~$*.xlsx
 ~$*.xls
 
-# Environment & Logs
+# Environment, IDE & Logs
 *.log
+daily_update.log
+daily_pipeline.log
+*.bak
+*.tmp
 .env
 .DS_Store
 Thumbs.db
 .idea/
 .vscode/
+
+# Scratch directory (keep JSON cache, ignore other files)
+scratch/*
+!scratch/*.json
