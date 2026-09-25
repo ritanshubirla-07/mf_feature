@@ -23,44 +23,50 @@ An institutional-grade mutual fund analytics engine and offline interactive dash
 
 ---
 
-## 🛠️ Quick Setup (New Machine)
+## 🛠️ Step-by-Step Setup (New Machine)
 
-### 1. Prerequisites
-- Python 3.10+
-- Git
+### Step 1: Clone the Repository
+```bash
+git clone https://github.com/ritanshubirla-07/mf_feature.git
+cd mf_feature
+```
 
-### 2. Install Dependencies
+### Step 2: Install Python Dependencies
 ```bash
 pip install -r requirements.txt
 ```
 
-### 3. Open Dashboard
-Simply double-click [`index.html`](index.html) or open it in any modern browser. It loads immediately with all 118 categories and Regular/Direct plans.
-
-### 4. Large Fact Table (from Google Drive)
-Download the full historical fact table archive `amfi_nav_master.csv` provided via Google Drive and place it in the root folder:
+### Step 3: Add Historical Fact Table (from Google Drive)
+Download `amfi_nav_master.csv` from the provided Google Drive link and place it in the folder as:
 ```text
 mf-feature/
-├── amfi_nav_master.csv/
-│   └── amfi_nav_master.csv      # 3.8GB full historical tick table
+└── amfi_nav_master.csv/
+    └── amfi_nav_master.csv      # 3.8GB full historical tick table
 ```
+
+### Step 4: Open & View the Dashboard
+Simply double-click [`index.html`](index.html) or open it in any modern browser. It loads immediately with all 118 categories and Regular/Direct plans.
 
 ---
 
-## 🔄 Daily Automation & Updates
+## 🔄 Daily Updates & Automation
 
-- **Run Manual Update**:
-  ```bash
-  python run_daily_pipeline.py
-  ```
-  *(Or double-click `run_daily_pipeline.bat` on Windows)*
+To update the dashboard with fresh closing NAVs:
 
-- **Schedule Daily Updates (Windows Task Scheduler)**:
-  Run PowerShell as Administrator / User:
-  ```powershell
-  powershell -ExecutionPolicy Bypass -File setup_daily_cron.ps1
-  ```
-  This schedules an automatic run every night at **23:00 (11:00 PM IST)**.
+### Option A: One-Click Manual Update (Anytime)
+Double-click **`run_daily_pipeline.bat`** (or run `python run_daily_pipeline.py`).
+In ~15 seconds, it will:
+1. Fetch today's AMFI feed
+2. Update the historical database
+3. Recompute rolling return analytics
+4. Rebuild `index.html` with the latest data
+
+### Option B: Automatic Daily Schedule (Hands-Free)
+To have Windows automatically update the dashboard every night at **23:00 (11:00 PM IST)**:
+```powershell
+powershell -ExecutionPolicy Bypass -File setup_daily_cron.ps1
+```
+*(Runs automatically in the background even if missed during sleep)*
 
 ---
 
@@ -73,7 +79,6 @@ mf-feature/
 ├── amfi_nav_master_latest.csv                  # Master dimension table (8,400+ active schemes)
 ├── mf_history_cache.json                       # 10-year historical NAV cache
 ├── fund_manager_master.csv                     # Fund manager directory & expense ratios
-├── flexi_cap_3yr_rolling_analysis_half_yearly.xlsx  # Reference consolidated Excel report
 ├── scratch/                                    # Pre-computed analytics engine JSON caches
 ├── requirements.txt                            # Python dependencies
 ├── run_daily_pipeline.py                       # Master daily automation pipeline

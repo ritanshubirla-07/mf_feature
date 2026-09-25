@@ -27,7 +27,18 @@ import numpy as np
 
 # Paths
 BASE_DIR = os.path.dirname(os.path.abspath(__file__))
-FACT_TABLE_PATH = os.path.join(BASE_DIR, "amfi_nav_master.csv", "amfi_nav_master.csv")
+
+def get_fact_table_path() -> str:
+    """Finds amfi_nav_master.csv whether placed directly in root or inside a folder."""
+    direct_file = os.path.join(BASE_DIR, "amfi_nav_master.csv")
+    if os.path.isfile(direct_file):
+        return direct_file
+    nested_file = os.path.join(BASE_DIR, "amfi_nav_master.csv", "amfi_nav_master.csv")
+    if os.path.isfile(nested_file):
+        return nested_file
+    return direct_file
+
+FACT_TABLE_PATH = get_fact_table_path()
 DIM_TABLE_PATH = os.path.join(BASE_DIR, "amfi_nav_master_latest.csv")
 DIM_BACKUP_PATH = os.path.join(BASE_DIR, "amfi_nav_master_latest.csv.bak")
 LOG_FILE_PATH = os.path.join(BASE_DIR, "daily_update.log")
@@ -235,11 +246,12 @@ def run_daily_update():
         
         # 3. Stream-Append to Fact Table (amfi_nav_master.csv)
         # Columns: scheme_code,date,nav,scheme_name,isin
-        if os.path.exists(FACT_TABLE_PATH):
+        fact_path = get_fact_table_path()
+        if os.path.exists(fact_path):
             append_count = 0
             ref_lookup = df_latest.set_index("scheme_code").to_dict("index")
             
-            with open(FACT_TABLE_PATH, "a", newline="", encoding="utf-8") as f_out:
+            with open(fact_path, "a", newline="", encoding="utf-8") as f_out:
                 writer = csv.writer(f_out)
                 for idx, r in df_today.iterrows():
                     code = r["scheme_code"]
@@ -253,14 +265,14 @@ def run_daily_update():
                         isin = ref_lookup[code].get("isin") or r["isin"]
                     else:
                         name = r["scheme_name"]
-                        isin = r["isin"]
+                    isin = r["isin"]
                         
                     writer.writerow([code, latest_feed_date, f"{nav_val:.4f}", name, isin])
                     append_count += 1
                     
-            logging.info(f"[SUCCESS] Appended {append_count:,} records for {latest_feed_date} to {FACT_TABLE_PATH}.")
+            logging.info(f"[SUCCESS] Appended {append_count:,} records for {latest_feed_date} to {fact_path}.")
         else:
-            logging.warning(f"Fact table not found at {FACT_TABLE_PATH}; skipped append.")
+            logging.warning(f"Fact table not found at {fact_path}; skipped append.")
 
     # 4. Synchronize Master Dimension Table (amfi_nav_master_latest.csv)
     logging.info("Updating master dimension table (amfi_nav_master_latest.csv)...")

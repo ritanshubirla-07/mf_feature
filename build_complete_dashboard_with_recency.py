@@ -1701,8 +1701,4 @@ html_code = f'''<!DOCTYPE html>
 with open("index.html", "w", encoding="utf-8") as f:
     f.write(html_code)
 
-brain_path = r"C:\Users\hiten\.gemini\antigravity\brain\94742509-c694-497e-9599-a7a4a826c346\index.html"
-with open(brain_path, "w", encoding="utf-8") as f:
-    f.write(html_code)
-
 print("Updated index.html: Columns removed, >75% eligible windows threshold applied, ranking by Composite Score (65% consistency + 35% recency), all 3 scores rounded integers with no % sign!")
