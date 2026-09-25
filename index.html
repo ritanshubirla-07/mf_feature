@@ -662,7 +662,7 @@
           .sort((a, b) => b.cagr - a.cagr);
 
         const n = winFunds.length;
-        const top_25_pct = Math.max(1, Math.round(n * 0.25));
+        const top_25_pct = n === 0 ? 0 : Math.max(1, Math.round(n * 0.25));
         const top_funds = winFunds.slice(0, top_25_pct);
 
         computedWindows.push({
@@ -679,24 +679,30 @@
       // Render Table 1
       computedWindows.forEach((win, winIdx) => {
         const topFunds = win.top_funds || [];
-        const bestFund = topFunds[0] || null;
-        const bestName = bestFund ? `#1: ${bestFund.schemeName}` : "N/A";
+        const hasFunds = win.n > 0 && topFunds.length > 0;
+        const bestFund = hasFunds ? topFunds[0] : null;
+        const bestName = bestFund ? `#1: ${bestFund.schemeName}` : "—";
         const bestCagr = (bestFund && bestFund.cagr !== null && bestFund.cagr !== undefined) ? `${bestFund.cagr.toFixed(2)}%` : "—";
+        const hasChildren = hasFunds && topFunds.length > 1;
 
         const summaryTr = document.createElement("tr");
-        summaryTr.className = "summary-row cursor-pointer";
-        summaryTr.onclick = () => toggleRow(winIdx);
+        summaryTr.className = `summary-row ${hasChildren ? "cursor-pointer" : "cursor-default"}`;
+        if (hasChildren) {
+          summaryTr.onclick = () => toggleRow(winIdx);
+        }
 
         summaryTr.innerHTML = `
           <td class="py-2.5 px-3 text-center border-cell">
-            <span class="toggle-btn" id="toggle-btn-${winIdx}">+</span>
+            ${hasChildren 
+              ? `<span class="toggle-btn" id="toggle-btn-${winIdx}">+</span>` 
+              : `<span class="text-slate-300 font-mono">−</span>`}
           </td>
           <td class="py-2.5 px-4 text-center font-bold border-cell">${win.start_date}</td>
           <td class="py-2.5 px-4 text-center font-bold border-cell">${win.end_date}</td>
           <td class="py-2.5 px-3 text-center font-bold border-cell">${win.quarter}</td>
           <td class="py-2.5 px-4 text-center font-bold border-cell">${win.n}</td>
           <td class="py-2.5 px-4 text-center font-bold border-cell">${win.top_25_pct}</td>
-          <td class="py-2.5 px-6 font-bold border-cell text-left">${bestName}</td>
+          <td class="py-2.5 px-6 font-bold border-cell text-left text-slate-700">${bestName}</td>
           <td class="py-2.5 px-4 text-right font-bold border-cell">${bestCagr}</td>
         `;
         tbody1.appendChild(summaryTr);
@@ -1284,9 +1290,9 @@
       let currRow = 8;
       activeComputedDataset.windows.forEach((w, winIdx) => {
         const topFunds = w.top_funds || [];
-        const bestFund = topFunds[0] || null;
-        const bestName = bestFund ? `#1: ${bestFund.schemeName}` : 'N/A';
-        const bestCagr = bestFund ? (bestFund.cagr / 100.0) : 0;
+        const hasFunds = w.n > 0 && topFunds.length > 0;
+        const bestFund = hasFunds ? topFunds[0] : null;
+        const bestName = bestFund ? `#1: ${bestFund.schemeName}` : '—';
 
         const sRow = currRow;
         ws.getCell(sRow, 1).value = w.start_date;
@@ -1296,8 +1302,12 @@
         ws.getCell(sRow, 5).value = w.top_25_pct;
         ws.getCell(sRow, 6).value = bestName;
         const cTop = ws.getCell(sRow, 9);
-        cTop.value = bestCagr;
-        cTop.numFmt = '0.00%';
+        if (bestFund && bestFund.cagr !== null && bestFund.cagr !== undefined) {
+          cTop.value = bestFund.cagr / 100.0;
+          cTop.numFmt = '0.00%';
+        } else {
+          cTop.value = '—';
+        }
 
         for (let c = 1; c <= 9; c++) {
           const cell = ws.getCell(sRow, c);
