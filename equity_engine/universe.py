@@ -94,11 +94,73 @@ def populate_universe_master(db_path=None) -> int:
     conn.close()
     return count
 
+def populate_bse_scrips(db_path=None) -> int:
+    """
+    Seeds all ~5,000 BSE listed companies into the database.
+    If a company is BSE-only, it registers it under its BSE code.
+    """
+    import json
+    init_db(db_path) if db_path else init_db()
+    conn = get_connection(db_path) if db_path else get_connection()
+    cur = conn.cursor()
+
+    bse_cache_path = os.path.join(CACHE_DIR, "bse_scrips.json")
+    scrips = {}
+    if os.path.exists(bse_cache_path):
+        try:
+            with open(bse_cache_path, "r", encoding="utf-8") as f:
+                scrips = json.load(f)
+        except Exception:
+            pass
+
+    if not scrips:
+        try:
+            from bsedata.bse import BSE
+            b = BSE()
+            b.updateScripCodes()
+            scrips = b.getScripCodes()
+            with open(bse_cache_path, "w", encoding="utf-8") as f:
+                json.dump(scrips, f)
+        except Exception as e:
+            print(f"Warning: Could not fetch BSE scrips ({e})")
+            return 0
+
+    # Get known symbols and bse_codes
+    cur.execute("SELECT symbol, bse_code FROM companies")
+    existing_symbols = set()
+    existing_bse = set()
+    for row in cur.fetchall():
+        existing_symbols.add(row[0])
+        if row[1]:
+            existing_bse.add(str(row[1]).strip())
+
+    added = 0
+    for code, name in scrips.items():
+        code_str = str(code).strip()
+        name_str = str(name).strip()
+        if code_str in existing_bse:
+            continue
+        if code_str not in existing_symbols:
+            cur.execute('''
+            INSERT OR IGNORE INTO companies (symbol, name, bse_code, updated_at)
+            VALUES (?, ?, ?, CURRENT_TIMESTAMP)
+            ''', (code_str, name_str, code_str))
+            existing_symbols.add(code_str)
+            existing_bse.add(code_str)
+            added += 1
+
+    conn.commit()
+    conn.close()
+    return added
+
 if __name__ == "__main__":
     print("Fetching universe and seeding companies master table...")
-    c = populate_universe_master()
-    print(f"Seeded {c} active NSE companies into database!")
-    n50 = get_nifty50_symbols()
-    print(f"Nifty 50 count: {len(n50)}")
-    n500 = get_nifty500_symbols()
-    print(f"Nifty 500 count: {len(n500)}")
+    c_nse = populate_universe_master()
+    print(f"Seeded {c_nse} active NSE companies into database!")
+    c_bse = populate_bse_scrips()
+    print(f"Seeded {c_bse} additional BSE companies into database!")
+    
+    conn = get_connection()
+    total_comps = conn.execute("SELECT count(*) FROM companies").fetchone()[0]
+    conn.close()
+    print(f"Total companies in database: {total_comps}")
