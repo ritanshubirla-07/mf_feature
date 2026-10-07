@@ -102,7 +102,7 @@ Stores the evaluated 34-parameter scoring.
 
 #### Usage:
 ```bash
-# Update all companies in the database:
+# High-speed daily update (Bhavcopy for all 2,000+ stocks + fundamentals for tracked universe):
 python daily_append.py
 
 # Update a single stock:
@@ -110,6 +110,9 @@ python daily_append.py --symbol TCS
 
 # Update and automatically re-generate Excel files:
 python daily_append.py --generate-excel
+
+# Skip NSE Bhavcopy quote sync (only update fundamentals):
+python daily_append.py --no-bhav
 ```
 
 ---
@@ -126,7 +129,7 @@ python daily_append.py --generate-excel
    * Rows 6–368: All 34 parameters, criteria descriptions, and actual scores.
    * Preserves all `"Dig Deep "` qualitative notes in Column L.
    * Embeds all 16 underlying multi-year data tables (Annual Sales, Quarterly Sales, P&L Margins, Debt/Equity, Asset/Inventory/Debtor Turnover, CFO vs PAT, SSGR, Free Cash Flow, and Valuation Stats).
-3. **Automatic Ingestion:** If the requested stock is not yet in the local database, it fetches 10+ years of data, ingests it, and generates the file in ~3.5 seconds.
+3. **Instant On-Demand Ingestion:** If the requested stock is not yet in the local database, it fetches 10+ years of data, ingests it into SQLite, and generates the file in ~3 seconds.
 
 #### Usage:
 ```bash
@@ -135,7 +138,40 @@ python generate_vm_excel.py RELIANCE
 python generate_vm_excel.py TCS
 python generate_vm_excel.py JSWSTEEL
 python generate_vm_excel.py INFY
+python generate_vm_excel.py HDFCBANK
 
 # Custom output filename:
 python generate_vm_excel.py RELIANCE -o "Reliance_Analysis.xlsx"
 ```
+
+---
+
+## 3. High-Scale Market Pipeline & Bulk Ingestion
+
+To compete with platforms like Screener and handle institutional-grade scale across the entire Indian stock market:
+
+### 1. Master Universe (`equity_engine/universe.py`)
+* Automatically seeds all **2,333 active NSE equities** (`SERIES == 'EQ'`) from official NSE master listings.
+* Categorizes by index: **Nifty 50**, **Nifty 500**, and **All Listed Equities**.
+
+### 2. High-Speed NSE Bhavcopy Engine (`equity_engine/bhavcopy.py`)
+* Downloads official daily NSE Bhavcopy archives in **1 single HTTP request (<2 seconds)**.
+* Bulk-updates closing price (CMP), open, high, low, volume, turnover, and delivery percentage across **all 2,600+ securities simultaneously**.
+* Supports historical backfilling for any date range.
+
+### 3. Resumable Bulk Fundamental Ingester (`equity_engine/bulk_ingester.py`)
+* Systematically pre-loads 10–12 years of fundamental statements, quarterly reports, and 34-parameter Vijay Malik scores:
+```bash
+# Ingest the Nifty 50 (Mega-caps, ~45 seconds):
+python -m equity_engine.bulk_ingester --tier nifty50
+
+# Ingest the Nifty 500 (94% of Indian market cap, ~6-8 minutes):
+python -m equity_engine.bulk_ingester --tier nifty500
+
+# Ingest the entire NSE listed universe (~2,000+ stocks):
+python -m equity_engine.bulk_ingester --tier all
+
+# Custom symbols:
+python -m equity_engine.bulk_ingester --symbols TATAMOTORS,ITC,LT
+```
+* **Resumable & Safe**: Skips already synced companies, features 0.8s rate-limiting with random jitter to prevent IP throttle, and saves progress dynamically after every company.

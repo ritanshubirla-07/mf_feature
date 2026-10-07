@@ -17,29 +17,41 @@ def log(msg):
     with open(LOG_FILE, "a", encoding="utf-8") as f:
         f.write(formatted + "\n")
 
-def run_daily_append(symbols=None, generate_excels=False, db_path=DB_PATH):
+from equity_engine.bhavcopy import sync_latest_bhavcopy
+
+def run_daily_append(symbols=None, generate_excels=False, sync_bhav=True, db_path=DB_PATH):
     init_db(db_path)
-    conn = get_connection(db_path)
     
+    # 1. High-speed Bulk NSE Bhavcopy update (All 2,000+ stocks in ~2 seconds)
+    if sync_bhav:
+        log("=== SYNCING OFFICIAL NSE BHAVCOPY FOR ENTIRE MARKET ===")
+        bhav_date, bhav_count = sync_latest_bhavcopy(db_path=db_path)
+        if bhav_date:
+            log(f"  -> Successfully updated daily quotes for {bhav_count} stocks on {bhav_date}")
+        else:
+            log("  -> Bhavcopy up to date or market holiday.")
+
+    # 2. Financial statement & ratio updates for tracked fundamental universe
+    conn = get_connection(db_path)
     if not symbols:
-        rows = conn.execute("SELECT symbol, name FROM companies ORDER BY symbol").fetchall()
+        # Update companies that have fundamental history tracked
+        rows = conn.execute("SELECT DISTINCT symbol FROM annual_financials ORDER BY symbol").fetchall()
         symbols = [r['symbol'] for r in rows]
     conn.close()
 
     if not symbols:
-        log("No companies found in database to update.")
+        log("No fundamental companies found in database to update.")
         return
 
     today_str = datetime.date.today().strftime("%Y-%m-%d")
-    log(f"=== STARTING DAILY APPEND PIPELINE FOR {len(symbols)} COMPANIES ({today_str}) ===")
+    log(f"=== UPDATING FUNDAMENTALS & EVALUATION SCORES FOR {len(symbols)} TRACKED STOCKS ({today_str}) ===")
 
     success_count = 0
     fail_count = 0
 
     for sym in symbols:
         try:
-            log(f"Processing {sym}...")
-            # 1. Fetch latest numbers (market quote + any new filings)
+            # 1. Fetch latest numbers (market quote + any new quarterly/annual filings)
             comp_info = fetch_and_store_company(sym, db_path=db_path)
             
             # 2. Recalculate 34 parameters
@@ -64,7 +76,8 @@ if __name__ == "__main__":
     parser = argparse.ArgumentParser(description="Daily Equity Market Data Append Script")
     parser.add_argument("--symbol", "-s", help="Specific stock symbol to append (default: all in DB)", default=None)
     parser.add_argument("--generate-excel", "-g", action="store_true", help="Also generate identical Excel files after append")
+    parser.add_argument("--no-bhav", action="store_true", help="Skip NSE Bhavcopy market quote sync")
     args = parser.parse_args()
 
     sym_list = [args.symbol.upper()] if args.symbol else None
-    run_daily_append(symbols=sym_list, generate_excels=args.generate_excel)
+    run_daily_append(symbols=sym_list, generate_excels=args.generate_excel, sync_bhav=not args.no_bhav)

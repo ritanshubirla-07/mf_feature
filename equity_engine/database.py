@@ -17,7 +17,8 @@ def init_db(db_path=DB_PATH):
         name TEXT NOT NULL,
         industry TEXT,
         bse_code TEXT,
-        screener_url TEXT,
+        isin TEXT,
+        listing_date TEXT,
         is_financial BOOLEAN DEFAULT 0,
         updated_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP
     );
@@ -26,6 +27,12 @@ def init_db(db_path=DB_PATH):
         symbol TEXT,
         date TEXT,
         cmp REAL,
+        open_price REAL,
+        high_price REAL,
+        low_price REAL,
+        volume INTEGER,
+        delivery_pct REAL,
+        turnover_lacs REAL,
         market_cap REAL,
         pe REAL,
         book_value REAL,
@@ -119,6 +126,23 @@ def init_db(db_path=DB_PATH):
         FOREIGN KEY(symbol) REFERENCES companies(symbol)
     );
     ''')
+    
+    # Column migrations for existing tables
+    def ensure_column(table, column, col_type):
+        cur.execute(f"PRAGMA table_info({table})")
+        cols = [c[1] for c in cur.fetchall()]
+        if column not in cols:
+            cur.execute(f"ALTER TABLE {table} ADD COLUMN {column} {col_type}")
+
+    ensure_column("companies", "isin", "TEXT")
+    ensure_column("companies", "listing_date", "TEXT")
+    ensure_column("daily_market_quotes", "open_price", "REAL")
+    ensure_column("daily_market_quotes", "high_price", "REAL")
+    ensure_column("daily_market_quotes", "low_price", "REAL")
+    ensure_column("daily_market_quotes", "volume", "INTEGER")
+    ensure_column("daily_market_quotes", "delivery_pct", "REAL")
+    ensure_column("daily_market_quotes", "turnover_lacs", "REAL")
+
     conn.commit()
     conn.close()
 

@@ -30,14 +30,20 @@ def resolve_company(query):
     query_str = str(query).strip()
     # Check if direct ticker
     direct_url = f"https://www.screener.in/company/{query_str.upper()}/consolidated/"
-    r = requests.get(direct_url, headers=HEADERS, timeout=10)
-    if r.status_code == 200:
-        return query_str.upper(), direct_url
+    try:
+        r = requests.get(direct_url, headers=HEADERS, timeout=10)
+        if r.status_code == 200:
+            return query_str.upper(), direct_url, r.content
+    except Exception:
+        pass
     
     standalone_url = f"https://www.screener.in/company/{query_str.upper()}/"
-    r = requests.get(standalone_url, headers=HEADERS, timeout=10)
-    if r.status_code == 200:
-        return query_str.upper(), standalone_url
+    try:
+        r = requests.get(standalone_url, headers=HEADERS, timeout=10)
+        if r.status_code == 200:
+            return query_str.upper(), standalone_url, r.content
+    except Exception:
+        pass
         
     # Search API
     search_url = f"https://www.screener.in/api/company/search/?q={query_str}"
@@ -48,11 +54,14 @@ def resolve_company(query):
             first = data[0]
             url = f"https://www.screener.in{first['url']}"
             sym = first['url'].strip('/').split('/')[1]
-            return sym, url
+            r_page = requests.get(url, headers=HEADERS, timeout=10)
+            if r_page.status_code == 200:
+                return sym, url, r_page.content
+            return sym, url, None
     except Exception as e:
         print(f"Search resolution error: {e}")
         
-    return None, None
+    return None, None, None
 
 def parse_html_table(table_elem):
     if not table_elem:
@@ -64,15 +73,17 @@ def parse_html_table(table_elem):
 
 def fetch_and_store_company(query, db_path=None):
     init_db()
-    symbol, url = resolve_company(query)
+    symbol, url, content = resolve_company(query)
     if not symbol:
         raise ValueError(f"Could not find company for query '{query}'")
         
-    resp = requests.get(url, headers=HEADERS, timeout=15)
-    if resp.status_code != 200:
-        raise ConnectionError(f"Failed to fetch data from {url} (Status: {resp.status_code})")
+    if not content:
+        resp = requests.get(url, headers=HEADERS, timeout=15)
+        if resp.status_code != 200:
+            raise ConnectionError(f"Failed to fetch data from {url} (Status: {resp.status_code})")
+        content = resp.content
         
-    soup = BeautifulSoup(resp.content, 'html.parser')
+    soup = BeautifulSoup(content, 'html.parser')
     
     # 1. Company Meta
     h1 = soup.find('h1')
@@ -140,10 +151,25 @@ def fetch_and_store_company(query, db_path=None):
     ''', (symbol, today_str, cmp_val, mkt_cap, pe_val, bv_val, div_y, roce_v, roe_v, fv_val, 7.0))
     
     # 4. Insert Annual Financials
-    if not df_pl.empty and not df_bs.empty:
-        # Columns with dates (e.g. 'Mar 2017', 'Mar 2018')
-        year_cols = [c for c in df_pl.columns if any(m in c for m in ['Mar', 'Dec', 'Jun', 'Sep']) and c in df_bs.columns]
-        
+    year_cols = [c for c in df_pl.columns if any(m in c for m in ['Mar', 'Dec', 'Jun', 'Sep']) and c in df_bs.columns] if not df_pl.empty and not df_bs.empty else []
+    
+    # If consolidated view has no statement columns, fallback to standalone
+    if len(year_cols) == 0 and "/consolidated/" in url:
+        standalone_url = f"https://www.screener.in/company/{symbol}/"
+        try:
+            resp_sa = requests.get(standalone_url, headers=HEADERS, timeout=15)
+            if resp_sa.status_code == 200:
+                soup = BeautifulSoup(resp_sa.content, 'html.parser')
+                df_pl = get_section_df('profit-loss')
+                df_bs = get_section_df('balance-sheet')
+                df_cf = get_section_df('cash-flow')
+                df_q = get_section_df('quarters')
+                df_sh = get_section_df('shareholding')
+                year_cols = [c for c in df_pl.columns if any(m in c for m in ['Mar', 'Dec', 'Jun', 'Sep']) and c in df_bs.columns]
+        except Exception as e:
+            pass
+
+    if len(year_cols) > 0:
         for col in year_cols:
             def metric_val(df, metric_pattern):
                 if df.empty:
