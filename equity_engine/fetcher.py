@@ -150,26 +150,52 @@ def fetch_and_store_company(query, db_path=None):
     VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
     ''', (symbol, today_str, cmp_val, mkt_cap, pe_val, bv_val, div_y, roce_v, roe_v, fv_val, 7.0))
     
+    # Check if consolidated view has sufficient history (>= 8 years)
+    # If not, check if standalone has significantly more history (e.g. NESTLEIND, multinational subsidiaries)
+    if "/consolidated/" in url:
+        num_consol_years = len([c for c in df_pl.columns if any(m in str(c) for m in ['Mar', 'Dec', 'Jun', 'Sep'])])
+        if num_consol_years < 8:
+            standalone_url = f"https://www.screener.in/company/{symbol}/"
+            try:
+                resp_sa = requests.get(standalone_url, headers=HEADERS, timeout=15)
+                if resp_sa.status_code == 200:
+                    soup_sa = BeautifulSoup(resp_sa.content, 'html.parser')
+                    def get_sa_df(sec_id):
+                        sec = soup_sa.find('section', id=sec_id)
+                        return parse_html_table(sec.find('table')) if sec else pd.DataFrame()
+                    df_pl_sa = get_sa_df('profit-loss')
+                    num_sa_years = len([c for c in df_pl_sa.columns if any(m in str(c) for m in ['Mar', 'Dec', 'Jun', 'Sep'])])
+                    if num_sa_years > num_consol_years:
+                        df_pl = df_pl_sa
+                        df_bs = get_sa_df('balance-sheet')
+                        df_cf = get_sa_df('cash-flow')
+                        df_q = get_sa_df('quarters')
+                        df_sh = get_sa_df('shareholding')
+            except Exception:
+                pass
+
+    # Normalize period headers (e.g. 'Mar 2024  15m' -> 'Mar 2024') across all tables
+    def norm_period(col_name):
+        m = re.search(r'(Mar|Dec|Jun|Sep)\s+\d{4}', str(col_name))
+        return m.group(0) if m else str(col_name).strip()
+
+    for df in [df_pl, df_bs, df_cf, df_q, df_sh]:
+        if not df.empty:
+            df.columns = [norm_period(c) if any(m in str(c) for m in ['Mar', 'Dec', 'Jun', 'Sep']) else c for c in df.columns]
+
     # 4. Insert Annual Financials
     year_cols = [c for c in df_pl.columns if any(m in c for m in ['Mar', 'Dec', 'Jun', 'Sep']) and c in df_bs.columns] if not df_pl.empty and not df_bs.empty else []
-    
-    # If consolidated view has no statement columns, fallback to standalone
-    if len(year_cols) == 0 and "/consolidated/" in url:
-        standalone_url = f"https://www.screener.in/company/{symbol}/"
-        try:
-            resp_sa = requests.get(standalone_url, headers=HEADERS, timeout=15)
-            if resp_sa.status_code == 200:
-                soup = BeautifulSoup(resp_sa.content, 'html.parser')
-                df_pl = get_section_df('profit-loss')
-                df_bs = get_section_df('balance-sheet')
-                df_cf = get_section_df('cash-flow')
-                df_q = get_section_df('quarters')
-                df_sh = get_section_df('shareholding')
-                year_cols = [c for c in df_pl.columns if any(m in c for m in ['Mar', 'Dec', 'Jun', 'Sep']) and c in df_bs.columns]
-        except Exception as e:
-            pass
 
     if len(year_cols) > 0:
+        # Sort year columns chronologically to track Balance Sheet changes
+        def get_yr(c):
+            m = re.search(r'\d{4}', str(c))
+            return int(m.group(0)) if m else 0
+        year_cols = sorted(year_cols, key=get_yr)
+
+        prev_fa = None
+        prev_cwip = None
+
         for col in year_cols:
             def metric_val(df, metric_pattern):
                 if df.empty:
@@ -205,7 +231,16 @@ def fetch_and_store_company(query, db_path=None):
             
             cfo = metric_val(df_cf, 'operating activity')
             cfi = metric_val(df_cf, 'investing activity')
-            capex = abs(cfi) if cfi != 0 else 0.0
+
+            # Dr. Vijay Malik Balance Sheet Capex: (FA_t + CWIP_t) - (FA_{t-1} + CWIP_{t-1}) + Depn_t
+            if prev_fa is not None and prev_cwip is not None and (fa > 0 or cwip > 0):
+                calc_capex = (fa + cwip) - (prev_fa + prev_cwip) + depn
+                capex = calc_capex if calc_capex >= 0 else (abs(cfi) if cfi != 0 else 0.0)
+            else:
+                capex = abs(cfi) if cfi != 0 else 0.0
+
+            prev_fa = fa
+            prev_cwip = cwip
             fcf = cfo - capex
 
             # Extract fiscal year integer

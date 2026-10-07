@@ -3,12 +3,16 @@ import os
 
 DB_PATH = os.path.join(os.path.dirname(__file__), "equity_master.db")
 
-def get_connection(db_path=DB_PATH):
+def get_connection(db_path=None):
+    if db_path is None:
+        db_path = DB_PATH
     conn = sqlite3.connect(db_path)
     conn.row_factory = sqlite3.Row
     return conn
 
-def init_db(db_path=DB_PATH):
+def init_db(db_path=None):
+    if db_path is None:
+        db_path = DB_PATH
     conn = get_connection(db_path)
     cur = conn.cursor()
     cur.executescript('''
