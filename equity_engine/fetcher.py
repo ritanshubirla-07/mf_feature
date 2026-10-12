@@ -12,6 +12,12 @@ HEADERS = {
     'Accept-Language': 'en-US,en;q=0.5'
 }
 
+SESSION = requests.Session()
+SESSION.headers.update(HEADERS)
+adapter = requests.adapters.HTTPAdapter(pool_connections=25, pool_maxsize=25, max_retries=1)
+SESSION.mount('https://', adapter)
+SESSION.mount('http://', adapter)
+
 def clean_num(val):
     if val is None or pd.isna(val):
         return 0.0
@@ -31,34 +37,38 @@ def resolve_company(query):
     # Check if direct ticker
     direct_url = f"https://www.screener.in/company/{query_str.upper()}/consolidated/"
     try:
-        r = requests.get(direct_url, headers=HEADERS, timeout=10)
+        r = SESSION.get(direct_url, timeout=8)
         if r.status_code == 200:
             return query_str.upper(), direct_url, r.content
-    except Exception:
-        pass
+    except Exception as e:
+        if any(w in str(e).lower() for w in ['reset', 'connection', 'timeout', '10054']):
+            raise ConnectionError(f"Connection reset/timeout on {direct_url}: {e}")
     
     standalone_url = f"https://www.screener.in/company/{query_str.upper()}/"
     try:
-        r = requests.get(standalone_url, headers=HEADERS, timeout=10)
+        r = SESSION.get(standalone_url, timeout=8)
         if r.status_code == 200:
             return query_str.upper(), standalone_url, r.content
-    except Exception:
-        pass
+    except Exception as e:
+        if any(w in str(e).lower() for w in ['reset', 'connection', 'timeout', '10054']):
+            raise ConnectionError(f"Connection reset/timeout on {standalone_url}: {e}")
         
     # Search API
     search_url = f"https://www.screener.in/api/company/search/?q={query_str}"
     try:
-        sr = requests.get(search_url, headers=HEADERS, timeout=10)
+        sr = SESSION.get(search_url, timeout=8)
         data = sr.json()
         if data and len(data) > 0:
             first = data[0]
             url = f"https://www.screener.in{first['url']}"
             sym = first['url'].strip('/').split('/')[1]
-            r_page = requests.get(url, headers=HEADERS, timeout=10)
+            r_page = SESSION.get(url, timeout=8)
             if r_page.status_code == 200:
                 return sym, url, r_page.content
             return sym, url, None
     except Exception as e:
+        if any(w in str(e).lower() for w in ['reset', 'connection', 'timeout', '10054']):
+            raise ConnectionError(f"Connection reset/timeout on search: {e}")
         print(f"Search resolution error: {e}")
         
     return None, None, None
@@ -78,7 +88,7 @@ def fetch_and_store_company(query, db_path=None):
         raise ValueError(f"Could not find company for query '{query}'")
         
     if not content:
-        resp = requests.get(url, headers=HEADERS, timeout=15)
+        resp = SESSION.get(url, timeout=12)
         if resp.status_code != 200:
             raise ConnectionError(f"Failed to fetch data from {url} (Status: {resp.status_code})")
         content = resp.content
@@ -89,10 +99,28 @@ def fetch_and_store_company(query, db_path=None):
     h1 = soup.find('h1')
     comp_name = h1.text.strip() if h1 else symbol
     
-    # Check industry / sector if present in breadcrumbs
+    # Sector / Industry from breadcrumbs
+    # Screener breadcrumb structure: Home > Sector > Industry  (sometimes just Home > Industry)
     crumbs = soup.select('.breadcrumbs a')
-    industry = crumbs[-1].text.strip() if crumbs else "General"
-    is_financial = any(w in industry.lower() for w in ['bank', 'financial', 'finance', 'nbfc', 'housing'])
+    sector = ""
+    industry = ""
+    if len(crumbs) >= 3:
+        # Home, Sector, Industry
+        sector = crumbs[-2].text.strip()
+        industry = crumbs[-1].text.strip()
+    elif len(crumbs) == 2:
+        # Home, Industry (no separate sector shown)
+        sector = crumbs[-1].text.strip()
+        industry = crumbs[-1].text.strip()
+    elif len(crumbs) == 1:
+        sector = crumbs[0].text.strip()
+        industry = crumbs[0].text.strip()
+    # Remove generic "Home" label if it crept in
+    if sector.lower() in ('home', ''):
+        sector = ""
+    if industry.lower() in ('home', ''):
+        industry = ""
+    is_financial = any(w in (sector + industry).lower() for w in ['bank', 'financial', 'finance', 'nbfc', 'housing', 'insurance'])
     
     # Check BSE Code
     bse_code = ""
@@ -139,9 +167,9 @@ def fetch_and_store_company(query, db_path=None):
     
     # Insert Company Master
     cur.execute('''
-    INSERT OR REPLACE INTO companies (symbol, name, industry, bse_code, screener_url, is_financial, updated_at)
-    VALUES (?, ?, ?, ?, ?, ?, CURRENT_TIMESTAMP)
-    ''', (symbol, comp_name, industry, bse_code, url, is_financial))
+    INSERT OR REPLACE INTO companies (symbol, name, sector, industry, bse_code, screener_url, is_financial, updated_at)
+    VALUES (?, ?, ?, ?, ?, ?, ?, CURRENT_TIMESTAMP)
+    ''', (symbol, comp_name, sector, industry, bse_code, url, is_financial))
     
     # Insert Daily Quote
     today_str = datetime.now().strftime('%Y-%m-%d')
@@ -157,7 +185,7 @@ def fetch_and_store_company(query, db_path=None):
         if num_consol_years < 8:
             standalone_url = f"https://www.screener.in/company/{symbol}/"
             try:
-                resp_sa = requests.get(standalone_url, headers=HEADERS, timeout=15)
+                resp_sa = SESSION.get(standalone_url, timeout=12)
                 if resp_sa.status_code == 200:
                     soup_sa = BeautifulSoup(resp_sa.content, 'html.parser')
                     def get_sa_df(sec_id):
@@ -319,6 +347,7 @@ def fetch_and_store_company(query, db_path=None):
     return {
         'symbol': symbol,
         'name': comp_name,
+        'sector': sector,
         'industry': industry,
         'bse_code': bse_code,
         'cmp': cmp_val,

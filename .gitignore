@@ -49,3 +49,7 @@ Thumbs.db
 # Scratch directory (keep JSON cache, ignore other files)
 scratch/*
 !scratch/*.json
+
+# Large SQLite Databases
+*.db
+*.db.bak

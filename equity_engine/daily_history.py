@@ -8,37 +8,50 @@ from typing import List, Optional
 
 from .database import get_connection, init_db
 
-def backfill_stock_daily_history(symbols: List[str], period="5y", batch_size=50, db_path=None):
+def backfill_stock_daily_history(symbols: List[str], period="max", batch_size=40, db_path=None, skip_existing=True):
     """
-    Fetches real exchange-settled historical daily OHLCV price candles 
-    (5 to 10 years) and stores them in daily_market_quotes table.
+    Fetches real exchange-settled historical daily OHLCV price candles from Yahoo Finance (NSE).
+    period='max' fetches as far back as Yahoo has data (typically 20+ years for large caps).
+    skip_existing=True will skip symbols that already have 1200+ candles (already full).
     """
     init_db(db_path)
     conn = get_connection(db_path)
     cur = conn.cursor()
 
-    # Get known symbols to preserve referential integrity
     cur.execute("SELECT symbol FROM companies")
     known = set(r[0] for r in cur.fetchall())
 
-    valid_symbols = [s.strip().upper() for s in symbols if s.strip()]
+    if skip_existing:
+        cur.execute("SELECT symbol FROM daily_market_quotes WHERE volume > 0 GROUP BY symbol HAVING count(*) >= 1200")
+        already_full = set(r[0] for r in cur.fetchall())
+    else:
+        already_full = set()
+
+    valid_symbols = [s.strip().upper() for s in symbols if s.strip() and s.strip().upper() not in already_full]
     total = len(valid_symbols)
+    skipped = len(symbols) - total
+
     print(f"\n=======================================================")
-    print(f"  HISTORICAL DAILY PRICES BACKFILL ENGINE")
+    print(f"  NSE HISTORICAL DAILY PRICES BACKFILL (MAX PERIOD)")
     print(f"=======================================================")
-    print(f"Total Target Stocks: {total}")
-    print(f"Historical Period: {period}")
-    print(f"Batch Size: {batch_size}")
+    print(f"Total Symbols Requested: {len(symbols)}")
+    print(f"Already Full (1200+ days) - Skipped: {skipped}")
+    print(f"To Backfill Now: {total}")
+    print(f"Period: {period} | Batch Size: {batch_size}")
     print(f"=======================================================\n")
+
+    if total == 0:
+        print("All symbols already have full candle history. Nothing to do.")
+        conn.close()
+        return 0
 
     total_inserted = 0
 
     for i in range(0, total, batch_size):
         chunk = valid_symbols[i:i+batch_size]
-        # Append .NS suffix for NSE
         yf_tickers = [f"{s}.NS" for s in chunk]
-        print(f"[{i+1:>3}-{min(i+len(chunk), total):>3}/{total}] Fetching {len(chunk)} tickers from exchange archives...")
-        
+        print(f"[{i+1:>4}-{min(i+len(chunk), total):>4}/{total}] Fetching {len(chunk)} tickers (period={period})...")
+
         try:
             df = yf.download(yf_tickers, period=period, interval="1d", group_by="ticker", progress=False, auto_adjust=False)
             if df.empty:
@@ -48,7 +61,6 @@ def backfill_stock_daily_history(symbols: List[str], period="5y", batch_size=50,
             rows_to_insert = []
 
             for sym in chunk:
-                # Ensure company is in master
                 if sym not in known:
                     cur.execute("INSERT OR IGNORE INTO companies (symbol, name, updated_at) VALUES (?, ?, CURRENT_TIMESTAMP)", (sym, sym))
                     known.add(sym)
@@ -58,23 +70,23 @@ def backfill_stock_daily_history(symbols: List[str], period="5y", batch_size=50,
                     sym_df = df
                 else:
                     ticker_key = f"{sym}.NS"
-                    if ticker_key in df.columns.levels[0]:
-                        sym_df = df[ticker_key]
+                    try:
+                        if ticker_key in df.columns.get_level_values(0):
+                            sym_df = df[ticker_key]
+                    except Exception:
+                        pass
 
                 if sym_df is not None and not sym_df.empty:
                     sym_df = sym_df.dropna(subset=['Close'])
                     for dt, row in sym_df.iterrows():
                         date_str = dt.strftime('%Y-%m-%d')
-                        c_val = float(row.get('Close', 0.0))
-                        o_val = float(row.get('Open', 0.0)) if not pd.isna(row.get('Open')) else c_val
-                        h_val = float(row.get('High', 0.0)) if not pd.isna(row.get('High')) else c_val
-                        l_val = float(row.get('Low', 0.0)) if not pd.isna(row.get('Low')) else c_val
-                        v_val = int(row.get('Volume', 0)) if not pd.isna(row.get('Volume')) else 0
-
+                        c_val = float(row.get('Close', 0.0) or 0.0)
+                        o_val = float(row.get('Open', c_val) or c_val)
+                        h_val = float(row.get('High', c_val) or c_val)
+                        l_val = float(row.get('Low', c_val) or c_val)
+                        v_val = int(row.get('Volume', 0) or 0)
                         if c_val > 0:
-                            rows_to_insert.append((
-                                sym, date_str, c_val, o_val, h_val, l_val, v_val, 7.0
-                            ))
+                            rows_to_insert.append((sym, date_str, c_val, o_val, h_val, l_val, v_val, 7.0))
 
             if rows_to_insert:
                 cur.executemany('''
@@ -90,19 +102,25 @@ def backfill_stock_daily_history(symbols: List[str], period="5y", batch_size=50,
                 ''', rows_to_insert)
                 conn.commit()
                 total_inserted += len(rows_to_insert)
-                print(f"  -> Inserted {len(rows_to_insert)} daily price candles across {len(chunk)} stocks.")
+                print(f"  -> Inserted {len(rows_to_insert):,} candles across {len(chunk)} stocks.")
 
         except Exception as e:
-            print(f"  [ERROR] Batch download failed: {e}")
+            print(f"  [ERROR] Batch failed: {e}")
 
     conn.close()
     print(f"\n=======================================================")
-    print(f"  DAILY PRICES BACKFILL COMPLETED: {total_inserted} total records added")
+    print(f"  BACKFILL COMPLETED: {total_inserted:,} total candle records added")
     print(f"=======================================================\n")
     return total_inserted
 
 if __name__ == "__main__":
-    from .universe import get_nifty50_symbols
-    n50 = get_nifty50_symbols()
-    print(f"Backfilling 5-year daily prices for Nifty 50 ({len(n50)} stocks)...")
-    backfill_stock_daily_history(n50, period="5y", batch_size=25)
+    import sys
+    from .database import get_connection as gc
+    conn = gc()
+    # All NSE-style named tickers (not 6-digit BSE codes)
+    syms = [r[0] for r in conn.execute("SELECT symbol FROM companies").fetchall()]
+    conn.close()
+    nse_syms = [s for s in syms if not (len(s) == 6 and s.isdigit())]
+    print(f"Starting max-period backfill for {len(nse_syms)} NSE symbols...")
+    backfill_stock_daily_history(nse_syms, period="max", batch_size=40)
+

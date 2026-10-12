@@ -19,8 +19,10 @@ def init_db(db_path=None):
     CREATE TABLE IF NOT EXISTS companies (
         symbol TEXT PRIMARY KEY,
         name TEXT NOT NULL,
+        sector TEXT,
         industry TEXT,
         bse_code TEXT,
+        screener_url TEXT,
         isin TEXT,
         listing_date TEXT,
         is_financial BOOLEAN DEFAULT 0,
@@ -129,6 +131,12 @@ def init_db(db_path=None):
         parameters_json TEXT,
         FOREIGN KEY(symbol) REFERENCES companies(symbol)
     );
+
+    CREATE TABLE IF NOT EXISTS sync_state (
+        key TEXT PRIMARY KEY,
+        value TEXT,
+        updated_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP
+    );
     ''')
     
     # Column migrations for existing tables
@@ -138,6 +146,8 @@ def init_db(db_path=None):
         if column not in cols:
             cur.execute(f"ALTER TABLE {table} ADD COLUMN {column} {col_type}")
 
+    ensure_column("companies", "sector", "TEXT")
+    ensure_column("companies", "screener_url", "TEXT")
     ensure_column("companies", "isin", "TEXT")
     ensure_column("companies", "listing_date", "TEXT")
     ensure_column("daily_market_quotes", "open_price", "REAL")

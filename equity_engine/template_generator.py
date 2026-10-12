@@ -3,11 +3,12 @@ import sqlite3
 import pandas as pd
 import os
 
-TEMPLATE_PATH = r"C:\Users\hiten\Downloads\JSW_Steel analysis.xlsx"
-DB_PATH = r"c:\Users\hiten\mf-feature\equity_engine\equity_master.db"
+from .database import get_connection, DB_PATH
 
-def generate_identical_excel(symbol, output_path=None, template_path=TEMPLATE_PATH, db_path=DB_PATH):
-    conn = sqlite3.connect(db_path)
+TEMPLATE_PATH = r"C:\Users\hiten\Downloads\JSW_Steel analysis.xlsx"
+
+def generate_identical_excel(symbol, output_path=None, template_path=TEMPLATE_PATH, db_path=None):
+    conn = get_connection(db_path) if db_path else get_connection()
     comp = conn.execute("SELECT * FROM companies WHERE symbol=?", (symbol,)).fetchone()
     if not comp:
         conn.close()
@@ -132,12 +133,12 @@ def generate_identical_excel(symbol, output_path=None, template_path=TEMPLATE_PA
 
     # 7. Valuation Stats (Rows 372-379)
     if mkt:
-        cmp_val = mkt[2]
-        mkt_cap = mkt[3]
-        pe_val = mkt[4]
-        bv_val = mkt[5]
-        div_y = mkt[6]
-        gsec_10y = mkt[10] if len(mkt) > 10 else 7.0
+        cmp_val = float(mkt['cmp'] or 0.0)
+        mkt_cap = float(mkt['market_cap'] or 0.0)
+        pe_val = float(mkt['pe'] or 0.0)
+        bv_val = float(mkt['book_value'] or 0.0)
+        div_y = float(mkt['div_yield'] or 0.0)
+        gsec_10y = float(mkt['gsec_10y'] or 7.0)
 
         ws.cell(372, 4, cmp_val) # CMP
         ws.cell(372, 9, mkt_cap) # Market Cap

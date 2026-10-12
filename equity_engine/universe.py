@@ -57,8 +57,8 @@ def get_all_nse_equities() -> pd.DataFrame:
             raise RuntimeError("Could not retrieve NSE equity master list")
 
     df.columns = [c.strip() for c in df.columns]
-    # Filter for standard equity series (EQ)
-    df = df[df['SERIES'].astype(str).str.strip() == 'EQ'].copy()
+    # Filter for active equity series (EQ: Normal, BE: Trade-to-Trade, BZ: Surveillance, SM: SME)
+    df = df[df['SERIES'].astype(str).str.strip().isin(['EQ', 'BE', 'BZ', 'SM'])].copy()
     df['SYMBOL'] = df['SYMBOL'].astype(str).str.strip()
     df['NAME OF COMPANY'] = df['NAME OF COMPANY'].astype(str).str.strip()
     return df
