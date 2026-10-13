@@ -7,6 +7,32 @@ with open("scratch/full_master_engine_data.json", "r", encoding="utf-8") as f:
 
 app_data_json = json.dumps(full_app_data)
 
+# --- Active fund managers + tenure for the Equity fund-detail card -----------
+# Sourced from equity_fund_manager_history.xlsx via fm_core. Keyed by scheme code
+# and covering every share class of a fund (Regular/Direct, Growth/IDCW/Bonus),
+# because a fund's managers do not differ by share class.
+try:
+    from fm_core import active_manager_map, ckey
+
+    _amap, _fm_asof = active_manager_map()
+    _eq_subs = full_app_data["hierarchy"]["Open Ended"]["Equity"]
+    fm_active = {}
+    for _sub in _eq_subs:
+        for _f in full_app_data["open_ended"].get(_sub, []):
+            _entry = _amap.get(ckey(_f["name"], True))
+            if _entry:
+                fm_active[_f["code"]] = [[_n, _t] for _n, _t, _m in _entry]
+    fm_asof_label = _fm_asof.strftime("%d %b %Y") if _fm_asof else ""
+    print(f"Active-manager map: {len(fm_active)} equity share classes covered "
+          f"(as-of {fm_asof_label}).")
+except Exception as _exc:
+    # the dashboard must still build if the workbook is missing or unreadable
+    fm_active, fm_asof_label = {}, ""
+    print(f"WARNING: active fund-manager data unavailable ({_exc}). "
+          f"Equity cards will fall back to the NAV master's manager field.")
+
+fm_active_json = json.dumps(fm_active)
+
 html_code = f'''<!DOCTYPE html>
 <html lang="en">
 <head>
@@ -370,6 +396,9 @@ html_code = f'''<!DOCTYPE html>
 
   <script>
     const appData = {app_data_json};
+    // scheme code -> [[manager name, tenure text], ...] for managers still in post
+    const activeManagers = {fm_active_json};
+    const fmAsOfLabel = "{fm_asof_label}";
 
     let currentSchemeType = "Open Ended";
     let currentCategoryGroup = "Equity";
@@ -965,6 +994,58 @@ html_code = f'''<!DOCTYPE html>
         const erFormatted = item.expense_ratio !== null && item.expense_ratio !== undefined ? `${{item.expense_ratio}}%` : "—";
         const fmFormatted = item.fund_manager && item.fund_manager !== "None" ? item.fund_manager : "—";
 
+        // Equity only: replace Expense Ratio + Fund Manager with the active
+        // managers and their tenure. Debt, Hybrid and Other (index funds, ETFs)
+        // keep the original four cells untouched.
+        const isEquityGroup = currentCategoryGroup === "Equity";
+        const amList = (typeof activeManagers !== "undefined" && activeManagers[item.code])
+          ? activeManagers[item.code] : null;
+        const amCount = amList ? amList.length : 0;
+
+        const navCellHtml = `
+                  <div class="p-3 bg-slate-50 rounded-xl border border-slate-100">
+                    <div class="text-[10px] font-semibold text-slate-500 uppercase tracking-wider mb-0.5">Latest NAV</div>
+                    <div class="text-base font-bold text-slate-900">${{navFormatted}}</div>
+                  </div>`;
+        const aumCellHtml = `
+                  <div class="p-3 bg-slate-50 rounded-xl border border-slate-100">
+                    <div class="text-[10px] font-semibold text-slate-500 uppercase tracking-wider mb-0.5">Latest AUM</div>
+                    <div class="text-base font-bold text-slate-900">${{aumFormatted}}</div>
+                  </div>`;
+
+        let detailsGridHtml;
+        if (isEquityGroup) {{
+          const mgrBodyHtml = amCount
+            ? amList.map(m => `
+                      <div class="flex items-baseline justify-between gap-3 py-[3px] border-b border-slate-200/60 last:border-0">
+                        <span class="text-[11px] font-bold text-slate-800 truncate" title="${{m[0]}}">${{m[0]}}</span>
+                        <span class="text-[10px] font-medium text-slate-500 whitespace-nowrap">${{m[1]}}</span>
+                      </div>`).join("")
+            : `<div class="text-[11px] font-semibold text-slate-500 py-[3px]" title="No current manager is listed for this scheme in the fund-manager history file, so the NAV master's manager field is shown and no tenure is available.">${{fmFormatted}}</div>`;
+          detailsGridHtml = `
+                  ${{navCellHtml}}
+                  ${{aumCellHtml}}
+                  <div class="p-3 bg-slate-50 rounded-xl border border-slate-100 sm:col-span-2 text-left">
+                    <div class="text-[10px] font-semibold text-slate-500 uppercase tracking-wider mb-1 flex items-baseline justify-between gap-2">
+                      <span>Active Fund Manager${{amCount === 1 ? "" : "s"}} &amp; Tenure</span>
+                      ${{amCount ? `<span class="text-[9px] font-medium text-slate-400 normal-case tracking-normal">as of ${{fmAsOfLabel}}</span>` : ``}}
+                    </div>
+                    ${{mgrBodyHtml}}
+                  </div>`;
+        }} else {{
+          detailsGridHtml = `
+                  ${{navCellHtml}}
+                  ${{aumCellHtml}}
+                  <div class="p-3 bg-slate-50 rounded-xl border border-slate-100">
+                    <div class="text-[10px] font-semibold text-slate-500 uppercase tracking-wider mb-0.5">Expense Ratio</div>
+                    <div class="text-base font-bold text-slate-900">${{erFormatted}}</div>
+                  </div>
+                  <div class="p-3 bg-slate-50 rounded-xl border border-slate-100 text-center">
+                    <div class="text-[10px] font-semibold text-slate-500 uppercase tracking-wider mb-0.5">Fund Manager</div>
+                    <div class="text-xs font-semibold text-slate-800 line-clamp-2" title="${{fmFormatted}}">${{fmFormatted}}</div>
+                  </div>`;
+        }}
+
         childTr.innerHTML = `
           <td colspan="7" class="p-4 sm:p-6 bg-slate-50/80">
             <div class="max-w-[98%] mx-auto space-y-4">
@@ -980,22 +1061,7 @@ html_code = f'''<!DOCTYPE html>
                 </div>
 
                 <div class="grid grid-cols-2 sm:grid-cols-4 gap-3 text-center">
-                  <div class="p-3 bg-slate-50 rounded-xl border border-slate-100">
-                    <div class="text-[10px] font-semibold text-slate-500 uppercase tracking-wider mb-0.5">Latest NAV</div>
-                    <div class="text-base font-bold text-slate-900">${{navFormatted}}</div>
-                  </div>
-                  <div class="p-3 bg-slate-50 rounded-xl border border-slate-100">
-                    <div class="text-[10px] font-semibold text-slate-500 uppercase tracking-wider mb-0.5">Latest AUM</div>
-                    <div class="text-base font-bold text-slate-900">${{aumFormatted}}</div>
-                  </div>
-                  <div class="p-3 bg-slate-50 rounded-xl border border-slate-100">
-                    <div class="text-[10px] font-semibold text-slate-500 uppercase tracking-wider mb-0.5">Expense Ratio</div>
-                    <div class="text-base font-bold text-slate-900">${{erFormatted}}</div>
-                  </div>
-                  <div class="p-3 bg-slate-50 rounded-xl border border-slate-100 text-center">
-                    <div class="text-[10px] font-semibold text-slate-500 uppercase tracking-wider mb-0.5">Fund Manager</div>
-                    <div class="text-xs font-semibold text-slate-800 line-clamp-2" title="${{fmFormatted}}">${{fmFormatted}}</div>
-                  </div>
+                  ${{detailsGridHtml}}
                 </div>
               </div>
 
